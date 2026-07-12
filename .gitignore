@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 dist/
 .env
+.env.*
+!.env.example
 *.db
 .DS_Store
 Thumbs.db
@@ -11,3 +13,8 @@ Thumbs.db
 .vscode/
 .idea/
 frontend/.vite/
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
