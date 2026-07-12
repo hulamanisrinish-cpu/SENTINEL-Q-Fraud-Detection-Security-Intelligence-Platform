@@ -125,6 +125,10 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('auth_success')) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
     fetch('/api/auth/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : { authenticated: false })
       .then(data => {

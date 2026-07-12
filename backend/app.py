@@ -850,13 +850,18 @@ def auth_google():
     return flask_redirect(authorization_url)
 
 
-@app.route('/api/auth/callback/google', methods=['POST'])
+@app.route('/api/auth/callback/google', methods=['GET'])
 @limiter.limit("10 per minute")
 def auth_callback_google():
-    """Handle Google OAuth callback"""
-    data = request.json or {}
-    code = data.get('code')
-    state = data.get('state')
+    """Handle Google OAuth callback (Google redirects with GET ?code=...&state=...)"""
+    from flask import redirect as flask_redirect
+
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+
+    if error:
+        return flask_redirect(f'http://localhost:3000?auth_error={error}')
 
     if not code:
         return jsonify({'error': 'Authorization code required'}), 400
@@ -869,7 +874,7 @@ def auth_callback_google():
     redirect_uri = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/google')
 
     if not client_id or not client_secret:
-        return jsonify({'error': 'Google OAuth not configured'}), 501
+        return flask_redirect('http://localhost:3000?auth_error=not_configured')
 
     try:
         from authlib.integrations.requests_client import OAuth2Session
@@ -888,7 +893,7 @@ def auth_callback_google():
         name = userinfo.get('name', '')
 
         if not email:
-            return jsonify({'error': 'Failed to get email from Google'}), 400
+            return flask_redirect('http://localhost:3000?auth_error=no_email')
 
         user = _get_or_create_user(email, name, 'google')
 
@@ -898,15 +903,7 @@ def auth_callback_google():
         session['role'] = user['role']
 
         logger.info('Google OAuth login: %s', email)
-        return jsonify({
-            'success': True,
-            'user': {
-                'user_id': user['user_id'],
-                'username': email,
-                'role': user['role'],
-                'provider': 'google'
-            }
-        })
+        return flask_redirect('http://localhost:3000?auth_success=1')
     except Exception as e:
         logger.error('Google OAuth callback failed: %s', e)
         return jsonify({'error': 'Google authentication failed'}), 500
@@ -938,13 +935,18 @@ def auth_microsoft():
     return flask_redirect(authorization_url)
 
 
-@app.route('/api/auth/callback/microsoft', methods=['POST'])
+@app.route('/api/auth/callback/microsoft', methods=['GET'])
 @limiter.limit("10 per minute")
 def auth_callback_microsoft():
-    """Handle Microsoft OAuth callback"""
-    data = request.json or {}
-    code = data.get('code')
-    state = data.get('state')
+    """Handle Microsoft OAuth callback (Microsoft redirects with GET ?code=...&state=...)"""
+    from flask import redirect as flask_redirect
+
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+
+    if error:
+        return flask_redirect(f'http://localhost:3000?auth_error={error}')
 
     if not code:
         return jsonify({'error': 'Authorization code required'}), 400
@@ -957,7 +959,7 @@ def auth_callback_microsoft():
     redirect_uri = os.environ.get('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/microsoft')
 
     if not client_id or not client_secret:
-        return jsonify({'error': 'Microsoft OAuth not configured'}), 501
+        return flask_redirect('http://localhost:3000?auth_error=not_configured')
 
     try:
         from authlib.integrations.requests_client import OAuth2Session
@@ -976,7 +978,7 @@ def auth_callback_microsoft():
         name = userinfo.get('displayName', '')
 
         if not email:
-            return jsonify({'error': 'Failed to get email from Microsoft'}), 400
+            return flask_redirect('http://localhost:3000?auth_error=no_email')
 
         user = _get_or_create_user(email, name, 'microsoft')
 
@@ -986,15 +988,7 @@ def auth_callback_microsoft():
         session['role'] = user['role']
 
         logger.info('Microsoft OAuth login: %s', email)
-        return jsonify({
-            'success': True,
-            'user': {
-                'user_id': user['user_id'],
-                'username': email,
-                'role': user['role'],
-                'provider': 'microsoft'
-            }
-        })
+        return flask_redirect('http://localhost:3000?auth_success=1')
     except Exception as e:
         logger.error('Microsoft OAuth callback failed: %s', e)
         return jsonify({'error': 'Microsoft authentication failed'}), 500
