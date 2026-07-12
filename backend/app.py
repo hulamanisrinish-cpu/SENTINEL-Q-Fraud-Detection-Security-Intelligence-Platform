@@ -2,7 +2,7 @@
 SENTINEL-Q Flask Backend API
 Provides endpoints for alert management, scoring, configuration, and live data ingestion
 """
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -11,10 +11,13 @@ import json
 import logging
 import random
 import re
+import secrets
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+
+import bcrypt
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
 
@@ -36,7 +39,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from scoring_engine import ScoringEngine
 
 app = Flask(__name__)
-CORS(app)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
+app.config.update(
+    SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV', 'production') == 'production',
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+)
+CORS(app, supports_credentials=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -648,6 +658,341 @@ def ingest_transaction():
         'input': data,
         **result
     })
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def _check_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+
+def _get_or_create_user(email: str, name: str = '', provider: str = 'local') -> dict:
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE username = ?', (email,)).fetchone()
+    if not user:
+        user_id = f"user_{secrets.token_hex(8)}"
+        conn.execute(
+            'INSERT INTO users (user_id, username, role, created_at) VALUES (?, ?, ?, ?)',
+            (user_id, email, 'analyst', datetime.now().isoformat())
+        )
+        conn.commit()
+        user = conn.execute('SELECT * FROM users WHERE username = ?', (email,)).fetchone()
+    conn.close()
+    return dict(user)
+
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+
+@app.route('/api/auth/login', methods=['POST'])
+@limiter.limit("10 per minute")
+def auth_login():
+    data = request.json
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    if len(email) > 254 or len(password) > 128:
+        return jsonify({'error': 'Invalid credentials'}), 400
+
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE username = ?', (email,)).fetchone()
+    conn.close()
+
+    if not user:
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    user = dict(user)
+
+    if not user.get('password_hash') or not _check_password(password, user['password_hash']):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    session.permanent = True
+    session['user_id'] = user['user_id']
+    session['username'] = user['username']
+    session['role'] = user['role']
+
+    logger.info('User logged in: %s', email)
+    return jsonify({
+        'success': True,
+        'user': {
+            'user_id': user['user_id'],
+            'username': user['username'],
+            'role': user['role'],
+            'provider': 'local'
+        }
+    })
+
+
+@app.route('/api/auth/register', methods=['POST'])
+@limiter.limit("5 per minute")
+def auth_register():
+    data = request.json
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    if len(email) > 254 or '@' not in email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    if len(password) > 128:
+        return jsonify({'error': 'Password too long'}), 400
+
+    conn = get_db_connection()
+    existing = conn.execute('SELECT user_id FROM users WHERE username = ?', (email,)).fetchone()
+    conn.close()
+
+    if existing:
+        return jsonify({'error': 'An account with this email already exists'}), 409
+
+    user = _get_or_create_user(email)
+
+    hashed = _hash_password(password)
+    conn = get_db_connection()
+    conn.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', (hashed, user['user_id']))
+    conn.commit()
+    conn.close()
+
+    session.permanent = True
+    session['user_id'] = user['user_id']
+    session['username'] = email
+    session['role'] = 'analyst'
+
+    logger.info('User registered: %s', email)
+    return jsonify({
+        'success': True,
+        'user': {
+            'user_id': user['user_id'],
+            'username': email,
+            'role': 'analyst',
+            'provider': 'local'
+        }
+    })
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    user_id = session.get('user_id', 'unknown')
+    session.clear()
+    logger.info('User logged out: %s', user_id)
+    return jsonify({'success': True})
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    if 'user_id' not in session:
+        return jsonify({'authenticated': False}), 401
+    return jsonify({
+        'authenticated': True,
+        'user': {
+            'user_id': session['user_id'],
+            'username': session.get('username', ''),
+            'role': session.get('role', 'analyst'),
+        }
+    })
+
+
+@app.route('/api/auth/google', methods=['GET'])
+@limiter.limit("10 per minute")
+def auth_google():
+    """Redirect to Google OAuth consent screen"""
+    from authlib.integrations.requests_client import OAuth2Session
+
+    client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
+    redirect_uri = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/google')
+
+    if not client_id:
+        return jsonify({'error': 'Google OAuth not configured. Set GOOGLE_CLIENT_ID environment variable.'}), 501
+
+    scope = 'openid email profile'
+    state = secrets.token_urlsafe(32)
+    session['oauth_state'] = state
+    session['oauth_provider'] = 'google'
+
+    oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri, scope=scope, state=state)
+    authorization_url, _ = oauth.create_authorization_url('https://accounts.google.com/o/oauth2/v2/auth')
+
+    return jsonify({'authorization_url': authorization_url})
+
+
+@app.route('/api/auth/callback/google', methods=['POST'])
+@limiter.limit("10 per minute")
+def auth_callback_google():
+    """Handle Google OAuth callback"""
+    data = request.json or {}
+    code = data.get('code')
+    state = data.get('state')
+
+    if not code:
+        return jsonify({'error': 'Authorization code required'}), 400
+
+    if state != session.get('oauth_state'):
+        return jsonify({'error': 'Invalid OAuth state'}), 400
+
+    client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
+    client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+    redirect_uri = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/google')
+
+    if not client_id or not client_secret:
+        return jsonify({'error': 'Google OAuth not configured'}), 501
+
+    try:
+        from authlib.integrations.requests_client import OAuth2Session
+
+        oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri)
+        token = oauth.fetch_token(
+            'https://oauth2.googleapis.com/token',
+            code=code,
+            client_secret=client_secret,
+        )
+
+        userinfo_resp = oauth.get('https://www.googleapis.com/oauth2/v3/userinfo')
+        userinfo = userinfo_resp.json()
+
+        email = userinfo.get('email', '')
+        name = userinfo.get('name', '')
+
+        if not email:
+            return jsonify({'error': 'Failed to get email from Google'}), 400
+
+        user = _get_or_create_user(email, name, 'google')
+
+        session.permanent = True
+        session['user_id'] = user['user_id']
+        session['username'] = email
+        session['role'] = user['role']
+
+        logger.info('Google OAuth login: %s', email)
+        return jsonify({
+            'success': True,
+            'user': {
+                'user_id': user['user_id'],
+                'username': email,
+                'role': user['role'],
+                'provider': 'google'
+            }
+        })
+    except Exception as e:
+        logger.error('Google OAuth callback failed: %s', e)
+        return jsonify({'error': 'Google authentication failed'}), 500
+
+
+@app.route('/api/auth/microsoft', methods=['GET'])
+@limiter.limit("10 per minute")
+def auth_microsoft():
+    """Redirect to Microsoft OAuth consent screen"""
+    from authlib.integrations.requests_client import OAuth2Session
+
+    client_id = os.environ.get('MICROSOFT_CLIENT_ID', '')
+    redirect_uri = os.environ.get('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/microsoft')
+
+    if not client_id:
+        return jsonify({'error': 'Microsoft OAuth not configured. Set MICROSOFT_CLIENT_ID environment variable.'}), 501
+
+    scope = 'openid email profile User.Read'
+    state = secrets.token_urlsafe(32)
+    session['oauth_state'] = state
+    session['oauth_provider'] = 'microsoft'
+
+    oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri, scope=scope, state=state)
+    authorization_url, _ = oauth.create_authorization_url(
+        'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
+    )
+
+    return jsonify({'authorization_url': authorization_url})
+
+
+@app.route('/api/auth/callback/microsoft', methods=['POST'])
+@limiter.limit("10 per minute")
+def auth_callback_microsoft():
+    """Handle Microsoft OAuth callback"""
+    data = request.json or {}
+    code = data.get('code')
+    state = data.get('state')
+
+    if not code:
+        return jsonify({'error': 'Authorization code required'}), 400
+
+    if state != session.get('oauth_state'):
+        return jsonify({'error': 'Invalid OAuth state'}), 400
+
+    client_id = os.environ.get('MICROSOFT_CLIENT_ID', '')
+    client_secret = os.environ.get('MICROSOFT_CLIENT_SECRET', '')
+    redirect_uri = os.environ.get('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/microsoft')
+
+    if not client_id or not client_secret:
+        return jsonify({'error': 'Microsoft OAuth not configured'}), 501
+
+    try:
+        from authlib.integrations.requests_client import OAuth2Session
+
+        oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri)
+        token = oauth.fetch_token(
+            'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+            code=code,
+            client_secret=client_secret,
+        )
+
+        userinfo_resp = oauth.get('https://graph.microsoft.com/v1.0/me')
+        userinfo = userinfo_resp.json()
+
+        email = userinfo.get('mail') or userinfo.get('userPrincipalName', '')
+        name = userinfo.get('displayName', '')
+
+        if not email:
+            return jsonify({'error': 'Failed to get email from Microsoft'}), 400
+
+        user = _get_or_create_user(email, name, 'microsoft')
+
+        session.permanent = True
+        session['user_id'] = user['user_id']
+        session['username'] = email
+        session['role'] = user['role']
+
+        logger.info('Microsoft OAuth login: %s', email)
+        return jsonify({
+            'success': True,
+            'user': {
+                'user_id': user['user_id'],
+                'username': email,
+                'role': user['role'],
+                'provider': 'microsoft'
+            }
+        })
+    except Exception as e:
+        logger.error('Microsoft OAuth callback failed: %s', e)
+        return jsonify({'error': 'Microsoft authentication failed'}), 500
+
 
 if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'

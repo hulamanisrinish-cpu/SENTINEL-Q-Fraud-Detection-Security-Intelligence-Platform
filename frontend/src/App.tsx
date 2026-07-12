@@ -7,7 +7,8 @@ import { ConfigPanel } from './components/ConfigPanel'
 import { ThreeBackground } from './components/ThreeBackground'
 import { CoverPage } from './components/CoverPage'
 import { LiveInput } from './components/LiveInput'
-import { Shield, Cpu, Activity, Database, Lock, RefreshCw } from 'lucide-react'
+import { LoginPage } from './components/LoginPage'
+import { Shield, Cpu, Activity, Database, Lock, RefreshCw, LogOut } from 'lucide-react'
 
 function useCountUp(end: number, duration: number = 1.5) {
   const [count, setCount] = useState(0)
@@ -116,14 +117,56 @@ function SkeletonLoader({ className = '' }: { className?: string }) {
 }
 
 function App() {
+  const [user, setUser] = useState<any>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const { scrollYProgress } = useScroll()
   const headerOpacity = useTransform(scrollYProgress, [0, 0.1], [0, 1])
   const headerY = useTransform(scrollYProgress, [0, 0.1], [-50, 0])
   const [refreshKey, setRefreshKey] = useState(0)
 
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { authenticated: false })
+      .then(data => {
+        if (data.authenticated) setUser(data.user)
+      })
+      .catch(() => {})
+      .finally(() => setAuthLoading(false))
+  }, [])
+
+  const handleLogin = useCallback((userData: any) => {
+    setUser(userData)
+  }, [])
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    } catch {}
+    setUser(null)
+  }, [])
+
   const handleRefresh = useCallback(() => {
     setRefreshKey(k => k + 1)
   }, [])
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}>
+          <Shield className="w-8 h-8 text-white/20" />
+        </motion.div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <>
+        <ThreeBackground />
+        <LoginPage onLogin={handleLogin} />
+      </>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-black text-white relative noise-overlay">
@@ -170,6 +213,18 @@ function App() {
               <Cpu className="w-4 h-4" />
             </motion.div>
             <span>SYS: ONLINE</span>
+          </div>
+          <div className="flex items-center gap-3 pl-4 border-l border-white/5">
+            <div className="text-xs font-mono text-white/30">{user.username}</div>
+            <motion.button
+              onClick={handleLogout}
+              className="p-2 bg-white/5 rounded-full border border-white/5 text-white/40 hover:text-white/70 hover:bg-white/10 transition-all"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+            </motion.button>
           </div>
         </div>
       </motion.header>

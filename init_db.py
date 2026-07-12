@@ -80,6 +80,7 @@ def init_db():
         user_id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL DEFAULT 'analyst',
+        password_hash TEXT,
         created_at TEXT NOT NULL
     )''')
 
@@ -95,6 +96,23 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+    # Migrate: add password_hash column if missing
+    conn2 = sqlite3.connect(DB_PATH)
+    cols = [row[1] for row in conn2.execute("PRAGMA table_info(users)").fetchall()]
+    if 'password_hash' not in cols:
+        conn2.execute('ALTER TABLE users ADD COLUMN password_hash TEXT')
+        conn2.commit()
+        print("Migrated: added password_hash column to users table")
+    if 'name' in cols and 'username' not in cols:
+        conn2.execute('ALTER TABLE users RENAME COLUMN name TO username')
+        conn2.commit()
+        print("Migrated: renamed users.name to users.username")
+    if 'created_at' not in cols:
+        conn2.execute("ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+        conn2.commit()
+        print("Migrated: added created_at column to users table")
+    conn2.close()
     print(f"Database initialized at {DB_PATH}")
 
 if __name__ == '__main__':
