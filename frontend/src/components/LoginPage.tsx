@@ -69,8 +69,26 @@ export function LoginPage({ onLogin }: { onLogin: (user: any) => void }) {
     }
   }
 
-  const handleOAuth = (provider: 'google' | 'microsoft') => {
-    window.location.href = `/api/auth/${provider}`
+  const handleOAuth = async (provider: 'google' | 'microsoft') => {
+    setError('')
+    try {
+      const resp = await fetch(`/api/auth/${provider}`, { credentials: 'include' })
+      if (resp.status === 501) {
+        const data = await resp.json()
+        setError(data.error || `${provider} OAuth is not configured yet.`)
+        return
+      }
+      if (resp.redirected) {
+        window.location.href = resp.url
+      } else if (resp.ok) {
+        const data = await resp.json()
+        if (data.authorization_url) {
+          window.location.href = data.authorization_url
+        }
+      }
+    } catch {
+      setError('Failed to connect to authentication server.')
+    }
   }
 
   return (

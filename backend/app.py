@@ -827,12 +827,13 @@ def auth_me():
 def auth_google():
     """Redirect to Google OAuth consent screen"""
     from authlib.integrations.requests_client import OAuth2Session
+    from flask import redirect as flask_redirect
 
     client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
     redirect_uri = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/google')
 
     if not client_id:
-        return jsonify({'error': 'Google OAuth not configured. Set GOOGLE_CLIENT_ID environment variable.'}), 501
+        return jsonify({'error': 'Google OAuth not configured. Set GOOGLE_CLIENT_ID in your .env file.'}), 501
 
     scope = 'openid email profile'
     state = secrets.token_urlsafe(32)
@@ -842,7 +843,7 @@ def auth_google():
     oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri, scope=scope, state=state)
     authorization_url, _ = oauth.create_authorization_url('https://accounts.google.com/o/oauth2/v2/auth')
 
-    return jsonify({'authorization_url': authorization_url})
+    return flask_redirect(authorization_url)
 
 
 @app.route('/api/auth/callback/google', methods=['POST'])
@@ -912,12 +913,13 @@ def auth_callback_google():
 def auth_microsoft():
     """Redirect to Microsoft OAuth consent screen"""
     from authlib.integrations.requests_client import OAuth2Session
+    from flask import redirect as flask_redirect
 
     client_id = os.environ.get('MICROSOFT_CLIENT_ID', '')
     redirect_uri = os.environ.get('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/microsoft')
 
     if not client_id:
-        return jsonify({'error': 'Microsoft OAuth not configured. Set MICROSOFT_CLIENT_ID environment variable.'}), 501
+        return jsonify({'error': 'Microsoft OAuth not configured. Set MICROSOFT_CLIENT_ID in your .env file.'}), 501
 
     scope = 'openid email profile User.Read'
     state = secrets.token_urlsafe(32)
@@ -929,7 +931,7 @@ def auth_microsoft():
         'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
     )
 
-    return jsonify({'authorization_url': authorization_url})
+    return flask_redirect(authorization_url)
 
 
 @app.route('/api/auth/callback/microsoft', methods=['POST'])
