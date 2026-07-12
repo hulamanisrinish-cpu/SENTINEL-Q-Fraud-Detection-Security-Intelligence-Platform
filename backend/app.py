@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 import bcrypt
+import dns.resolver
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
 
@@ -44,8 +45,9 @@ from scoring_engine import ScoringEngine
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
+is_production = os.environ.get('FLASK_DEBUG', '0') != '1'
 app.config.update(
-    SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV', 'production') == 'production',
+    SESSION_COOKIE_SECURE=is_production,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
@@ -668,6 +670,38 @@ def ingest_transaction():
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+EMAIL_RE = re.compile(
+    r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+)
+
+DISPOSABLE_DOMAINS = {
+    'tempmail.com', 'throwaway.email', 'guerrillamail.com', 'mailinator.com',
+    'yopmail.com', 'trashmail.com', 'sharklasers.com', 'guerrillamailblock.com',
+    'grr.la', 'dispostable.com', '10minutemail.com', 'temp-mail.org',
+    'fakeinbox.com', 'tempinbox.com', 'mohmal.com', 'getnada.com',
+    'emailondeck.com', 'burnermail.io', 'discard.email', 'tmpmail.net',
+}
+
+
+def _is_valid_email(email: str) -> bool:
+    if not EMAIL_RE.match(email):
+        return False
+    domain = email.split('@')[1].lower()
+    if domain in DISPOSABLE_DOMAINS:
+        return False
+    return True
+
+
+def _is_valid_domain(domain: str) -> bool:
+    try:
+        mx_records = dns.resolver.resolve(domain, 'MX')
+        return len(mx_records) > 0
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN,
+            dns.resolver.NoNameservers, dns.exception.DNSException,
+            dns.name.EmptyLabel):
+        return False
+
+
 def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
@@ -718,6 +752,9 @@ def auth_login():
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
+    if not _is_valid_email(email):
+        return jsonify({'error': 'Invalid email format'}), 400
+
     if len(email) > 254 or len(password) > 128:
         return jsonify({'error': 'Invalid credentials'}), 400
 
@@ -745,7 +782,6 @@ def auth_login():
             'user_id': user['user_id'],
             'username': user['username'],
             'role': user['role'],
-            'provider': 'local'
         }
     })
 
@@ -763,14 +799,30 @@ def auth_register():
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
-    if len(email) > 254 or '@' not in email:
-        return jsonify({'error': 'Invalid email address'}), 400
+    if not _is_valid_email(email):
+        return jsonify({'error': 'Invalid email format'}), 400
+
+    domain = email.split('@')[1]
+    if not _is_valid_domain(domain):
+        return jsonify({'error': 'Email domain does not exist or has no MX record'}), 400
 
     if len(password) < 8:
         return jsonify({'error': 'Password must be at least 8 characters'}), 400
 
     if len(password) > 128:
         return jsonify({'error': 'Password too long'}), 400
+
+    if not re.search(r'[A-Z]', password):
+        return jsonify({'error': 'Password must contain at least one uppercase letter'}), 400
+
+    if not re.search(r'[a-z]', password):
+        return jsonify({'error': 'Password must contain at least one lowercase letter'}), 400
+
+    if not re.search(r'\d', password):
+        return jsonify({'error': 'Password must contain at least one digit'}), 400
+
+    if not re.search(r'[!@#$%^&*(),.?\":{}|<>]', password):
+        return jsonify({'error': 'Password must contain at least one special character'}), 400
 
     conn = get_db_connection()
     existing = conn.execute('SELECT user_id FROM users WHERE username = ?', (email,)).fetchone()
@@ -799,7 +851,6 @@ def auth_register():
             'user_id': user['user_id'],
             'username': email,
             'role': 'analyst',
-            'provider': 'local'
         }
     })
 
@@ -826,172 +877,27 @@ def auth_me():
     })
 
 
-@app.route('/api/auth/google', methods=['GET'])
-@limiter.limit("10 per minute")
-def auth_google():
-    """Redirect to Google OAuth consent screen"""
-    from authlib.integrations.requests_client import OAuth2Session
-    from flask import redirect as flask_redirect
+@app.route('/api/auth/validate-email', methods=['POST'])
+@limiter.limit("20 per minute")
+def validate_email():
+    """Validate an email address format and domain"""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
 
-    client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
-    redirect_uri = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/google')
+    email = data.get('email', '').strip().lower()
 
-    if not client_id:
-        return jsonify({'error': 'Google OAuth not configured. Set GOOGLE_CLIENT_ID in your .env file.'}), 501
+    if not email:
+        return jsonify({'valid': False, 'error': 'Email is required'}), 400
 
-    scope = 'openid email profile'
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-    session['oauth_provider'] = 'google'
+    if not _is_valid_email(email):
+        return jsonify({'valid': False, 'error': 'Invalid email format'}), 400
 
-    oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri, scope=scope, state=state)
-    authorization_url, _ = oauth.create_authorization_url('https://accounts.google.com/o/oauth2/v2/auth')
+    domain = email.split('@')[1]
+    if not _is_valid_domain(domain):
+        return jsonify({'valid': False, 'error': 'Email domain does not exist or has no MX record'}), 400
 
-    return flask_redirect(authorization_url)
-
-
-@app.route('/api/auth/callback/google', methods=['GET'])
-@limiter.limit("10 per minute")
-def auth_callback_google():
-    """Handle Google OAuth callback (Google redirects with GET ?code=...&state=...)"""
-    from flask import redirect as flask_redirect
-
-    code = request.args.get('code')
-    state = request.args.get('state')
-    error = request.args.get('error')
-
-    if error:
-        return flask_redirect(f'http://localhost:3000?auth_error={error}')
-
-    if not code:
-        return jsonify({'error': 'Authorization code required'}), 400
-
-    if state != session.get('oauth_state'):
-        return jsonify({'error': 'Invalid OAuth state'}), 400
-
-    client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
-    client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-    redirect_uri = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/google')
-
-    if not client_id or not client_secret:
-        return flask_redirect('http://localhost:3000?auth_error=not_configured')
-
-    try:
-        from authlib.integrations.requests_client import OAuth2Session
-
-        oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri)
-        token = oauth.fetch_token(
-            'https://oauth2.googleapis.com/token',
-            code=code,
-            client_secret=client_secret,
-        )
-
-        userinfo_resp = oauth.get('https://www.googleapis.com/oauth2/v3/userinfo')
-        userinfo = userinfo_resp.json()
-
-        email = userinfo.get('email', '')
-        name = userinfo.get('name', '')
-
-        if not email:
-            return flask_redirect('http://localhost:3000?auth_error=no_email')
-
-        user = _get_or_create_user(email, name, 'google')
-
-        session.permanent = True
-        session['user_id'] = user['user_id']
-        session['username'] = email
-        session['role'] = user['role']
-
-        logger.info('Google OAuth login: %s', email)
-        return flask_redirect('http://localhost:3000?auth_success=1')
-    except Exception as e:
-        logger.error('Google OAuth callback failed: %s', e)
-        return jsonify({'error': 'Google authentication failed'}), 500
-
-
-@app.route('/api/auth/microsoft', methods=['GET'])
-@limiter.limit("10 per minute")
-def auth_microsoft():
-    """Redirect to Microsoft OAuth consent screen"""
-    from authlib.integrations.requests_client import OAuth2Session
-    from flask import redirect as flask_redirect
-
-    client_id = os.environ.get('MICROSOFT_CLIENT_ID', '')
-    redirect_uri = os.environ.get('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/microsoft')
-
-    if not client_id:
-        return jsonify({'error': 'Microsoft OAuth not configured. Set MICROSOFT_CLIENT_ID in your .env file.'}), 501
-
-    scope = 'openid email profile User.Read'
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-    session['oauth_provider'] = 'microsoft'
-
-    oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri, scope=scope, state=state)
-    authorization_url, _ = oauth.create_authorization_url(
-        'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
-    )
-
-    return flask_redirect(authorization_url)
-
-
-@app.route('/api/auth/callback/microsoft', methods=['GET'])
-@limiter.limit("10 per minute")
-def auth_callback_microsoft():
-    """Handle Microsoft OAuth callback (Microsoft redirects with GET ?code=...&state=...)"""
-    from flask import redirect as flask_redirect
-
-    code = request.args.get('code')
-    state = request.args.get('state')
-    error = request.args.get('error')
-
-    if error:
-        return flask_redirect(f'http://localhost:3000?auth_error={error}')
-
-    if not code:
-        return jsonify({'error': 'Authorization code required'}), 400
-
-    if state != session.get('oauth_state'):
-        return jsonify({'error': 'Invalid OAuth state'}), 400
-
-    client_id = os.environ.get('MICROSOFT_CLIENT_ID', '')
-    client_secret = os.environ.get('MICROSOFT_CLIENT_SECRET', '')
-    redirect_uri = os.environ.get('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/callback/microsoft')
-
-    if not client_id or not client_secret:
-        return flask_redirect('http://localhost:3000?auth_error=not_configured')
-
-    try:
-        from authlib.integrations.requests_client import OAuth2Session
-
-        oauth = OAuth2Session(client_id=client_id, redirect_uri=redirect_uri)
-        token = oauth.fetch_token(
-            'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-            code=code,
-            client_secret=client_secret,
-        )
-
-        userinfo_resp = oauth.get('https://graph.microsoft.com/v1.0/me')
-        userinfo = userinfo_resp.json()
-
-        email = userinfo.get('mail') or userinfo.get('userPrincipalName', '')
-        name = userinfo.get('displayName', '')
-
-        if not email:
-            return flask_redirect('http://localhost:3000?auth_error=no_email')
-
-        user = _get_or_create_user(email, name, 'microsoft')
-
-        session.permanent = True
-        session['user_id'] = user['user_id']
-        session['username'] = email
-        session['role'] = user['role']
-
-        logger.info('Microsoft OAuth login: %s', email)
-        return flask_redirect('http://localhost:3000?auth_success=1')
-    except Exception as e:
-        logger.error('Microsoft OAuth callback failed: %s', e)
-        return jsonify({'error': 'Microsoft authentication failed'}), 500
+    return jsonify({'valid': True})
 
 
 if __name__ == '__main__':
