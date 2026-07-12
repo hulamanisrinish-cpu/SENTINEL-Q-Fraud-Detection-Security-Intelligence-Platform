@@ -6,6 +6,8 @@ dist/
 .env
 .env.*
 !.env.example
+backend/.env
+backend/.env.*
 *.db
 .DS_Store
 Thumbs.db

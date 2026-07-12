@@ -17,6 +17,10 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+
 import bcrypt
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
