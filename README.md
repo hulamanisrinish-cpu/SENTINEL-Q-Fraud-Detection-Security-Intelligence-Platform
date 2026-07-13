@@ -41,11 +41,43 @@ SENTINEL-Q is a **real-time correlation engine** that joins transaction behavior
 
 <div align="center">
 
-```
-Transaction Behavior ─┐
-                      ├─→ Correlation Engine ─→ Composite Risk Score ─→ SOC Dashboard
-Security Telemetry  ──┘         │
-                                └─→ Quantum Posture Analysis ─→ Crypto Alerts
+```mermaid
+graph LR
+    subgraph "🔗 DATA SOURCES"
+        A["💳 Transaction<br/>Behavior"] 
+        B["🔒 Security<br/>Telemetry"]
+        C["🔐 Crypto<br/>Inventory"]
+    end
+
+    subgraph "⚙️ CORRELATION ENGINE"
+        D["Session-ID<br/>Join"]
+        E["Multi-Signal<br/>Scorer"]
+        F["Quantum Posture<br/>Analyzer"]
+    end
+
+    subgraph "📊 OUTPUT"
+        G["🎯 Composite<br/>Risk Score"]
+        H["🚨 SOC<br/>Alerts"]
+        I["🛡️ Crypto<br/>Exposure"]
+    end
+
+    A --> D
+    B --> D
+    D --> E
+    E --> G
+    E --> H
+    C --> F
+    F --> I
+
+    style A fill:#1a1a2e,stroke:#e94560,color:#fff
+    style B fill:#1a1a2e,stroke:#e94560,color:#fff
+    style C fill:#1a1a2e,stroke:#e94560,color:#fff
+    style D fill:#16213e,stroke:#0f3460,color:#fff
+    style E fill:#16213e,stroke:#0f3460,color:#fff
+    style F fill:#16213e,stroke:#0f3460,color:#fff
+    style G fill:#0f3460,stroke:#533483,color:#fff
+    style H fill:#0f3460,stroke:#533483,color:#fff
+    style I fill:#0f3460,stroke:#533483,color:#fff
 ```
 
 </div>
@@ -202,61 +234,119 @@ sentinel-q/
 
 ## How It Works
 
-### 1. Data Ingestion
-Transaction and telemetry events arrive via the `/api/ingest` endpoint or the simulation engine.
+<div align="center">
 
-### 2. Correlation
-Events are joined on `session_id`, linking the financial behavior to the security context of the same session.
+```mermaid
+flowchart LR
+    A["📥 Ingest"] --> B["🔗 Correlate<br/>by Session ID"]
+    B --> C["🧮 Score"]
+    C --> D{"Risk<br/>Band?"}
+    D -->|"≥ 0.80"| E["🔴 CRITICAL<br/>Immediate escalation"]
+    D -->|"≥ 0.60"| F["🟠 HIGH<br/>Priority review"]
+    D -->|"≥ 0.30"| G["🟡 MEDIUM<br/>Standard monitoring"]
+    D -->|"< 0.30"| H["🟢 LOW<br/>Normal flow"]
+    C --> I["🤖 SHAP<br/>Explainability"]
+    I --> J["👨‍💻 Analyst<br/>Triage"]
+    J --> K{"Verdict"}
+    K -->|"False Positive"| L["✅ Resolved"]
+    K -->|"Escalated"| M["🚨 Escalated"]
 
-### 3. Multi-Signal Scoring
+    style A fill:#1a1a2e,stroke:#e94560,color:#fff
+    style B fill:#16213e,stroke:#0f3460,color:#fff
+    style C fill:#0f3460,stroke:#533483,color:#fff
+    style D fill:#1a1a2e,stroke:#e94560,color:#fff
+    style E fill:#7f1d1d,stroke:#ef4444,color:#fff
+    style F fill:#7c2d12,stroke:#f97316,color:#fff
+    style G fill:#713f12,stroke:#eab308,color:#fff
+    style H fill:#14532d,stroke:#22c55e,color:#fff
+    style I fill:#16213e,stroke:#0f3460,color:#fff
+    style J fill:#0f3460,stroke:#533483,color:#fff
+    style K fill:#1a1a2e,stroke:#e94560,color:#fff
+    style L fill:#14532d,stroke:#22c55e,color:#fff
+    style M fill:#7f1d1d,stroke:#ef4444,color:#fff
 ```
-Composite Score = (fraud_weight × fraud_score)
-                + (telemetry_weight × telemetry_score)
-                + (quantum_weight × quantum_posture_score)
+
+</div>
+
+### Scoring Formula
+
+<div align="center">
+
+```
+Composite Score = (0.40 × Fraud) + (0.40 × Telemetry) + (0.20 × Quantum Posture)
+
+    ┌─────────────┐    ┌──────────────┐    ┌────────────────┐
+    │ Fraud Score │    │  Telemetry   │    │ Quantum Posture│
+    │             │    │    Score     │    │     Score      │
+    │ • Amount    │    │ • IP Rep     │    │ • Cipher Risk  │
+    │ • Velocity  │    │ • Geo Match  │    │ • Sensitivity  │
+    │ • New Payee │    │ • Device FP  │    │   Multiplier   │
+    │ • Auth Fail │    │ • Auth Count │    │                │
+    └─────────────┘    └──────────────┘    └────────────────┘
 ```
 
-### 4. Risk Classification
-
-| Band | Score Range | Action |
-|------|------------|--------|
-| CRITICAL | ≥ 0.80 | Immediate escalation |
-| HIGH | ≥ 0.60 | Priority review |
-| MEDIUM | ≥ 0.30 | Standard monitoring |
-| LOW | < 0.30 | Normal flow |
-
-### 5. Analyst Triage
-Analysts review alerts, inspect SHAP feature attributions, add notes, and submit verdicts (false positive / escalated).
+</div>
 
 ---
 
 ## Architecture
 
+<div align="center">
+
+```mermaid
+graph TB
+    subgraph FRONTEND["🌐 FRONTEND — Vercel"]
+        direction LR
+        F1["📊 Dashboard"]
+        F2["⚡ Live Input"]
+        F3["🚨 Alert Queue"]
+        F4["🔐 Crypto Posture"]
+        F5["⚙️ Config Panel"]
+    end
+
+    subgraph API["🔗 REST API — HTTPS"]
+        direction LR
+        A1["GET /api/alerts"]
+        A2["POST /api/ingest"]
+        A3["POST /api/simulate"]
+        A4["GET /api/config"]
+        A5["POST /api/auth/*"]
+    end
+
+    subgraph BACKEND["⚙️ BACKEND — Render"]
+        direction TB
+        B1["🛡️ Auth & Rate Limiting<br/>bcrypt · Flask-Limiter"]
+        B2["🧮 Scoring Engine<br/>Fraud + Telemetry + Quantum"]
+        B3["🤖 SHAP Explainability<br/>Per-alert feature attribution"]
+        B4["📈 Stats & Analytics"]
+    end
+
+    subgraph DB["💾 DATABASE"]
+        direction LR
+        D1[("🐘 PostgreSQL<br/>Production")]
+        D2[("📁 SQLite<br/>Development")]
+    end
+
+    subgraph SCORING["🎯 SCORING PIPELINE"]
+        direction LR
+        S1["Fraud Score<br/>z-score · velocity<br/>new payee"]
+        S2["Telemetry Score<br/>IP reputation<br/>geo mismatch · device"]
+        S3["Quantum Score<br/>cipher risk<br/>× sensitivity"]
+    end
+
+    FRONTEND -->|"REST API"| API
+    API --> BACKEND
+    BACKEND --> DB
+    B2 --> SCORING
+
+    style FRONTEND fill:#0a0a1a,stroke:#e94560,color:#fff
+    style API fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style BACKEND fill:#16213e,stroke:#533483,color:#fff
+    style DB fill:#1a1a2e,stroke:#4169E1,color:#fff
+    style SCORING fill:#0f3460,stroke:#e94560,color:#fff
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    FRONTEND (Vercel)                      │
-│   React · TypeScript · Tailwind · Three.js · Recharts    │
-│                                                          │
-│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │
-│   │ Dashboard│ │Live Input│ │  Alerts  │ │  Crypto   │  │
-│   └────┬─────┘ └────┬─────┘ └────┬─────┘ └─────┬─────┘  │
-└────────┼─────────────┼───────────┼──────────────┼────────┘
-         │     REST API (HTTPS)     │              │
-┌────────┼─────────────┼───────────┼──────────────┼────────┐
-│        ▼             ▼           ▼              ▼        │
-│                    BACKEND (Render)                       │
-│               Flask · Gunicorn · bcrypt                   │
-│                                                          │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│   │  Auth & CORS │  │   Scoring    │  │   SHAP       │  │
-│   │  Rate Limit  │  │   Engine     │  │  Explainability│ │
-│   └──────┬───────┘  └──────┬───────┘  └──────────────┘  │
-│          │                  │                             │
-│          ▼                  ▼                             │
-│   ┌──────────────────────────────┐                       │
-│   │     PostgreSQL / SQLite      │                       │
-│   └──────────────────────────────┘                       │
-└──────────────────────────────────────────────────────────┘
-```
+
+</div>
 
 ---
 
