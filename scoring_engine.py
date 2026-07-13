@@ -63,11 +63,21 @@ class ScoringEngine:
         config = self.conn.execute(
             'SELECT * FROM scoring_config ORDER BY created_at DESC LIMIT 1'
         ).fetchone()
-        return dict(config) if config else None
+        if not config:
+            return None
+        d = dict(config)
+        for k in d:
+            if isinstance(d[k], (int, float)):
+                continue
+            try:
+                d[k] = float(d[k])
+            except (TypeError, ValueError):
+                pass
+        return d
 
     def _compute_amount_stats(self) -> Dict:
         mean_result = self.conn.execute('SELECT AVG(amount) as mean FROM transactions').fetchone()
-        mean = mean_result['mean'] or 0
+        mean = float(mean_result['mean'] or 0)
 
         variance_result = self.conn.execute(
             'SELECT AVG((amount - %s) * (amount - %s)) as variance FROM transactions',
@@ -80,13 +90,13 @@ class ScoringEngine:
                 (mean, mean)
             ).fetchone()
 
-        variance = variance_result['variance'] or 0
+        variance = float(variance_result['variance'] or 0)
         std = variance ** 0.5 if variance > 0 else 1
         return {'mean': mean, 'std': std}
 
     def _compute_velocity_stats(self, column: str) -> Dict:
         mean_result = self.conn.execute(f'SELECT AVG({column}) as mean FROM transactions').fetchone()
-        mean = mean_result['mean'] or 0
+        mean = float(mean_result['mean'] or 0)
 
         try:
             variance_result = self.conn.execute(
@@ -99,7 +109,7 @@ class ScoringEngine:
                 (mean, mean)
             ).fetchone()
 
-        variance = variance_result['variance'] or 0
+        variance = float(variance_result['variance'] or 0)
         std = variance ** 0.5 if variance > 0 else 1
         return {'mean': mean, 'std': std}
 
