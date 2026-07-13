@@ -61,7 +61,11 @@ app.config.update(
 )
 
 frontend_url = os.environ.get('FRONTEND_URL', '*')
-CORS(app, supports_credentials=True, origins=[frontend_url] if frontend_url != '*' else ['*'])
+if frontend_url and frontend_url != '*':
+    allowed_origins = [o.strip() for o in frontend_url.split(',') if o.strip()]
+else:
+    allowed_origins = ['*']
+CORS(app, supports_credentials=True, origins=allowed_origins)
 
 logging.basicConfig(
     level=logging.INFO,
