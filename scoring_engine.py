@@ -117,12 +117,12 @@ class ScoringEngine:
         if stats['std'] == 0:
             return 0.0
         z = (value - stats['mean']) / stats['std']
-        return 1 / (1 + np.exp(-z))
+        return float(1 / (1 + np.exp(-z)))
 
     def compute_fraud_score(self, transaction: Dict) -> float:
-        amount_score = self._z_score(transaction['amount'], self.amount_stats)
-        velocity_1h_score = self._z_score(transaction['velocity_1h'], self.velocity_1h_stats)
-        velocity_24h_score = self._z_score(transaction['velocity_24h'], self.velocity_24h_stats)
+        amount_score = self._z_score(float(transaction['amount']), self.amount_stats)
+        velocity_1h_score = self._z_score(float(transaction['velocity_1h']), self.velocity_1h_stats)
+        velocity_24h_score = self._z_score(float(transaction['velocity_24h']), self.velocity_24h_stats)
         new_payee_score = float(transaction['is_new_payee'])
 
         fraud_score = (
@@ -134,10 +134,10 @@ class ScoringEngine:
         return min(max(fraud_score, 0.0), 1.0)
 
     def compute_telemetry_score(self, telemetry: Dict) -> float:
-        ip_risk = 1.0 - telemetry['ip_reputation_score']
+        ip_risk = 1.0 - float(telemetry['ip_reputation_score'])
         geo_mismatch_score = float(telemetry['geo_mismatch'])
         device_changed_score = float(telemetry['device_fingerprint_changed'])
-        failed_auth_score = min(telemetry['failed_auth_count'] / 10.0, 1.0)
+        failed_auth_score = min(float(telemetry['failed_auth_count']) / 10.0, 1.0)
 
         telemetry_score = (
             0.3 * ip_risk +
