@@ -106,8 +106,10 @@ def internal_error(e):
 def get_db_connection():
     if DATABASE_URL:
         try:
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-            return conn
+            raw_conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            import db_compat
+            return db_compat.wrap_pg(raw_conn)
         except Exception:
             logger.warning('PostgreSQL connection failed, falling back to SQLite')
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))

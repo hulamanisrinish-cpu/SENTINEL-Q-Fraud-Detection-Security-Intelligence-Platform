@@ -34,7 +34,8 @@ def generate_seed_data(n_sessions=200, n_high_risk=30):
 
     if DATABASE_URL:
         try:
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            import db_compat
+            conn = db_compat.wrap_pg(psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor))
         except Exception:
             import db_compat
             db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')

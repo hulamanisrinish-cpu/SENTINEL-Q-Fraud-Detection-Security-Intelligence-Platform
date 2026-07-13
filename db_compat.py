@@ -64,3 +64,55 @@ def connect(db_path):
     raw = _sqlite3.connect(db_path)
     raw.row_factory = _sqlite3.Row
     return CompatConnection(raw)
+
+
+def wrap_pg(conn):
+    """Wrap a psycopg2 connection so conn.execute() works like sqlite3."""
+    class PgCompatCursor:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def execute(self, query, params=None):
+            if params is not None:
+                self._cursor.execute(query, params)
+            else:
+                self._cursor.execute(query)
+            return self
+
+        def fetchone(self):
+            return self._cursor.fetchone()
+
+        def fetchall(self):
+            return self._cursor.fetchall()
+
+        def __iter__(self):
+            return iter(self._cursor)
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class PgCompatConnection:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, query, params=None):
+            cur = self._conn.cursor()
+            if params is not None:
+                cur.execute(query, params)
+            else:
+                cur.execute(query)
+            return PgCompatCursor(cur)
+
+        def cursor(self):
+            return PgCompatCursor(self._conn.cursor())
+
+        def commit(self):
+            return self._conn.commit()
+
+        def close(self):
+            return self._conn.close()
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    return PgCompatConnection(conn)

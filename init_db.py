@@ -18,7 +18,8 @@ if DATABASE_URL and 'sslmode' not in DATABASE_URL:
 def get_connection():
     if DATABASE_URL:
         try:
-            return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            import db_compat
+            return db_compat.wrap_pg(psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor))
         except Exception:
             pass
     import db_compat

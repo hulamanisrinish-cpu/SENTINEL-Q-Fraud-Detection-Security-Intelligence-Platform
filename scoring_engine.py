@@ -30,8 +30,8 @@ def get_connection():
     database_url = _normalize_db_url(os.environ.get('DATABASE_URL', ''))
     if _is_valid_pg_url(database_url):
         try:
-            conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
-            return conn
+            import db_compat
+            return db_compat.wrap_pg(psycopg2.connect(database_url, cursor_factory=RealDictCursor))
         except Exception:
             pass
     import db_compat
@@ -44,7 +44,8 @@ class ScoringEngine:
         database_url = _normalize_db_url(os.environ.get('DATABASE_URL', ''))
         if _is_valid_pg_url(database_url):
             try:
-                self.conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+                import db_compat
+                self.conn = db_compat.wrap_pg(psycopg2.connect(database_url, cursor_factory=RealDictCursor))
             except Exception:
                 self.conn = get_connection()
         elif db_path_or_url and not db_path_or_url.startswith('postgres'):
