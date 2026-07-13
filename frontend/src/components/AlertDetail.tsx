@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Shield, Activity, Lock, CheckCircle, XCircle, Cpu } from 'lucide-react'
+import { apiFetch } from '../api'
 
 interface AlertDetailProps {
   alertId: string
@@ -19,7 +20,7 @@ export function AlertDetail({ alertId, onBack }: AlertDetailProps) {
   const fetchAlertDetail = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/alerts/${alertId}`)
+      const response = await apiFetch(`/api/alerts/${alertId}`)
       const data = await response.json()
       setAlert(data)
     } catch (error) {
@@ -31,7 +32,7 @@ export function AlertDetail({ alertId, onBack }: AlertDetailProps) {
 
   const handleVerdict = async (verdict: string) => {
     try {
-      await fetch(`/api/alerts/${alertId}/verdict`, {
+      await apiFetch(`/api/alerts/${alertId}/verdict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ verdict, note, analyst_id: 'analyst_001' })

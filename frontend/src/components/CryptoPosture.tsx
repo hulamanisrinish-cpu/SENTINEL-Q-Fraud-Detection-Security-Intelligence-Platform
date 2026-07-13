@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Lock, ShieldAlert, ShieldCheck, Key } from 'lucide-react'
+import { apiFetch } from '../api'
 
 export function CryptoPosture() {
   const [posture, setPosture] = useState<any>(null)
@@ -13,7 +14,7 @@ export function CryptoPosture() {
   const fetchCryptoPosture = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/crypto-posture/summary')
+      const response = await apiFetch('/api/crypto-posture/summary')
       const data = await response.json()
       setPosture(data)
     } catch (error) {

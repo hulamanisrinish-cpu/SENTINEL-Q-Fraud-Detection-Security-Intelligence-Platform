@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Settings, Save, Sliders } from 'lucide-react'
+import { apiFetch } from '../api'
 
 export function ConfigPanel() {
   const [config, setConfig] = useState<any>(null)
@@ -14,7 +15,7 @@ export function ConfigPanel() {
   const fetchConfig = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/config')
+      const response = await apiFetch('/api/config')
       const data = await response.json()
       setConfig(data)
     } catch (error) {
@@ -27,7 +28,7 @@ export function ConfigPanel() {
   const handleSave = async () => {
     try {
       setSaving(true)
-      await fetch('/api/config', {
+      await apiFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)

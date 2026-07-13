@@ -2,12 +2,14 @@
 SENTINEL-Q Sample Data Generator
 Seeds the database with realistic cybersecurity + transaction telemetry
 """
-import sqlite3
-import random
 import os
+import random
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 GEO_LOCATIONS = ['US-East', 'US-West', 'EU-West', 'EU-Central', 'AP-South', 'AP-East', 'SA-East']
 WEAK_CIPHERS = ['TLS_RSA_WITH_AES_256_CBC_SHA', 'TLS_RSA_WITH_3DES_EDE_CBC_SHA']
@@ -16,17 +18,28 @@ SENSITIVITY_CLASSES = ['financial_record', 'PII', 'transactional', 'session_toke
 AUTH_EVENTS = ['login', 'login', 'login', 'password_reset', 'mfa_challenge', 'session_extend']
 IP_PREFIXES = ['192.168', '10.0', '172.16', '203.0.113', '198.51.100', '8.8']
 
+
 def random_ip():
     return f"{random.choice(IP_PREFIXES)}.{random.randint(1,254)}.{random.randint(1,254)}"
+
 
 def generate_seed_data(n_sessions=200, n_high_risk=30):
     from init_db import init_db
     init_db()
 
-    conn = sqlite3.connect(DB_PATH)
+    if DATABASE_URL:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+
     c = conn.cursor()
 
-    existing = c.execute('SELECT COUNT(*) FROM transactions').fetchone()[0]
+    c.execute('SELECT COUNT(*) as count FROM transactions')
+    result = c.fetchone()
+    existing = result['count'] if isinstance(result, dict) else result[0]
     if existing >= n_sessions:
         print(f"Database already has {existing} sessions. Skipping generation.")
         conn.close()
@@ -73,21 +86,23 @@ def generate_seed_data(n_sessions=200, n_high_risk=30):
         tx_id = f"tx_{session_id[-6:]}"
 
         c.execute(
-            '''INSERT OR IGNORE INTO transactions
+            '''INSERT INTO transactions
                (transaction_id, session_id, customer_id, timestamp, amount,
                 geo_location, device_id, payee_id, is_new_payee, velocity_1h, velocity_24h)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (transaction_id) DO NOTHING''',
             (tx_id, session_id, customer_id, timestamp, amount,
              geo, device_id, payee_id, is_new_payee, velocity_1h, velocity_24h)
         )
 
         tel_id = f"tel_{session_id[-6:]}"
         c.execute(
-            '''INSERT OR IGNORE INTO telemetry
+            '''INSERT INTO telemetry
                (telemetry_id, session_id, customer_id, timestamp, auth_event_type,
                 ip_address, ip_reputation_score, device_fingerprint_changed,
                 geo_mismatch, tls_cipher_suite, data_sensitivity_class, failed_auth_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (telemetry_id) DO NOTHING''',
             (tel_id, session_id, customer_id, timestamp, auth_event,
              random_ip(), ip_reputation, device_fingerprint_changed,
              geo_mismatch, cipher_suite, data_sensitivity, failed_auth)
@@ -96,11 +111,12 @@ def generate_seed_data(n_sessions=200, n_high_risk=30):
     conn.commit()
 
     from scoring_engine import ScoringEngine
-    engine = ScoringEngine(DB_PATH)
+    engine = ScoringEngine()
     engine.score_all_sessions()
 
     print(f"\nGenerated {n_sessions} sessions ({n_high_risk} high-risk scenarios)")
     conn.close()
+
 
 if __name__ == '__main__':
     generate_seed_data()

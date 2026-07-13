@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, AlertCircle, CheckCircle } from 'lucide-react'
+import { apiFetch } from '../api'
 
 export function LoginPage({ onLogin }: { onLogin: (user: any) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -55,7 +56,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: any) => void }) {
         }
       }
 
-      const resp = await fetch(`/api/auth/${mode === 'register' ? 'register' : 'login'}`, {
+      const resp = await apiFetch(`/api/auth/${mode === 'register' ? 'register' : 'login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

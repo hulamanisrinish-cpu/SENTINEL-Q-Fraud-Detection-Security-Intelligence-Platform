@@ -6,7 +6,6 @@ from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import sqlite3
 import json
 import logging
 import random
@@ -24,7 +23,10 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 import bcrypt
 import dns.resolver
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 WEAK_CIPHERS = ['TLS_RSA_WITH_AES_256_CBC_SHA', 'TLS_RSA_WITH_3DES_EDE_CBC_SHA']
 MODERN_CIPHERS = ['TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305_SHA256',
@@ -49,10 +51,12 @@ is_production = os.environ.get('FLASK_DEBUG', '0') != '1'
 app.config.update(
     SESSION_COOKIE_SECURE=is_production,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SAMESITE='Lax' if not is_production else 'None',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
 )
-CORS(app, supports_credentials=True)
+
+frontend_url = os.environ.get('FRONTEND_URL', '*')
+CORS(app, supports_credentials=True, origins=[frontend_url] if frontend_url != '*' else ['*'])
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,13 +97,21 @@ def internal_error(e):
     logger.error('Internal server error: %s', e)
     return jsonify({'error': 'Internal server error'}), 500
 
+
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    if DATABASE_URL:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        import sqlite3 as sqlite3_mod
+        db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
+        conn = sqlite3_mod.connect(db_path)
+        conn.row_factory = sqlite3_mod.Row
     return conn
 
+
 def get_scoring_engine():
-    return ScoringEngine(DB_PATH)
+    return ScoringEngine()
+
 
 def score_and_store(session_id, transaction_data, telemetry_data):
     try:
@@ -109,10 +121,11 @@ def score_and_store(session_id, transaction_data, telemetry_data):
 
         tx_id = f"tx_{session_id[-6:]}" if len(session_id) >= 6 else f"tx_{random.randint(100000,999999)}"
         conn.execute(
-            '''INSERT OR IGNORE INTO transactions
+            '''INSERT INTO transactions
                (transaction_id, session_id, customer_id, timestamp, amount,
                 geo_location, device_id, payee_id, is_new_payee, velocity_1h, velocity_24h)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (transaction_id) DO NOTHING''',
             (tx_id, session_id, transaction_data.get('customer_id', f"cust_{random.randint(1000,9999)}"),
              now, transaction_data['amount'], transaction_data['geo_location'],
              transaction_data.get('device_id', f"device_{random.randint(1000,9999)}"),
@@ -124,11 +137,12 @@ def score_and_store(session_id, transaction_data, telemetry_data):
 
         tel_id = f"tel_{session_id[-6:]}" if len(session_id) >= 6 else f"tel_{random.randint(100000,999999)}"
         conn.execute(
-            '''INSERT OR IGNORE INTO telemetry
+            '''INSERT INTO telemetry
                (telemetry_id, session_id, customer_id, timestamp, auth_event_type,
                 ip_address, ip_reputation_score, device_fingerprint_changed,
                 geo_mismatch, tls_cipher_suite, data_sensitivity_class, failed_auth_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (telemetry_id) DO NOTHING''',
             (tel_id, session_id, transaction_data.get('customer_id', f"cust_{random.randint(1000,9999)}"),
              now, telemetry_data.get('auth_event_type', 'login'),
              telemetry_data.get('ip_address', f"192.168.{random.randint(1,254)}.{random.randint(1,254)}"),
@@ -155,7 +169,7 @@ def score_and_store(session_id, transaction_data, telemetry_data):
             '''INSERT INTO scores
                (score_id, session_id, fraud_score, telemetry_score, quantum_posture_score,
                 composite_score, risk_band, computed_at, config_version)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
             (score_id, session_id, score_result['fraud_score'],
              score_result['telemetry_score'], score_result['quantum_posture_score'],
              score_result['composite_score'], score_result['risk_band'],
@@ -166,10 +180,11 @@ def score_and_store(session_id, transaction_data, telemetry_data):
         if score_result['risk_band'] in ['HIGH', 'CRITICAL']:
             cursor = conn.execute(
                 '''INSERT INTO alerts (score_id, session_id, status, reviewed_at)
-                   VALUES (?, ?, 'open', ?)''',
+                   VALUES (%s, %s, 'open', %s)
+                   RETURNING alert_id''',
                 (score_id, session_id, now)
             )
-            alert_id = cursor.lastrowid
+            alert_id = cursor.fetchone()['alert_id']
 
         conn.commit()
         conn.close()
@@ -238,21 +253,23 @@ def get_alerts():
     params = []
 
     if status:
-        query += ' AND a.status = ?'
+        query += ' AND a.status = %s'
         params.append(status)
 
     if risk_band:
-        query += ' AND s.risk_band = ?'
+        query += ' AND s.risk_band = %s'
         params.append(risk_band)
 
-    query += ' ORDER BY s.composite_score DESC LIMIT ?'
+    query += ' ORDER BY s.composite_score DESC LIMIT %s'
     params.append(limit)
 
-    alerts = conn.execute(query, params).fetchall()
+    cursor = conn.execute(query, params)
+    alerts = cursor.fetchall()
     conn.close()
 
     result = []
     for alert in alerts:
+        alert = dict(alert)
         note_data = {}
         if alert['analyst_note']:
             try:
@@ -300,28 +317,33 @@ def get_alert_detail(alert_id):
 
     conn = get_db_connection()
 
-    alert = conn.execute(
+    cursor = conn.execute(
         '''SELECT a.*, s.fraud_score, s.telemetry_score, s.quantum_posture_score,
                   s.composite_score, s.risk_band, s.computed_at, s.config_version
            FROM alerts a
            INNER JOIN scores s ON a.score_id = s.score_id
-           WHERE a.alert_id = ?''',
+           WHERE a.alert_id = %s''',
         (alert_id,)
-    ).fetchone()
+    )
+    alert = cursor.fetchone()
 
     if not alert:
         conn.close()
         return jsonify({'error': 'Alert not found'}), 404
 
-    transaction = conn.execute(
-        'SELECT * FROM transactions WHERE session_id = ?',
-        (alert['session_id'],)
-    ).fetchone()
+    alert = dict(alert)
 
-    telemetry = conn.execute(
-        'SELECT * FROM telemetry WHERE session_id = ?',
+    cursor = conn.execute(
+        'SELECT * FROM transactions WHERE session_id = %s',
         (alert['session_id'],)
-    ).fetchone()
+    )
+    transaction = cursor.fetchone()
+
+    cursor = conn.execute(
+        'SELECT * FROM telemetry WHERE session_id = %s',
+        (alert['session_id'],)
+    )
+    telemetry = cursor.fetchone()
 
     conn.close()
 
@@ -385,8 +407,8 @@ def update_alert_verdict(alert_id):
         conn = get_db_connection()
         conn.execute(
             '''UPDATE alerts
-               SET verdict = ?, analyst_note = ?, analyst_id = ?, reviewed_at = ?, status = 'reviewed'
-               WHERE alert_id = ?''',
+               SET verdict = %s, analyst_note = %s, analyst_id = %s, reviewed_at = %s, status = 'reviewed'
+               WHERE alert_id = %s''',
             (verdict, note, analyst_id, datetime.now().isoformat(), alert_id)
         )
         conn.commit()
@@ -402,13 +424,15 @@ def update_alert_verdict(alert_id):
 def get_crypto_posture_summary():
     conn = get_db_connection()
 
-    cipher_stats = conn.execute(
+    cursor = conn.execute(
         '''SELECT tls_cipher_suite, data_sensitivity_class, COUNT(*) as count
            FROM telemetry
            GROUP BY tls_cipher_suite, data_sensitivity_class'''
-    ).fetchall()
+    )
+    cipher_stats = cursor.fetchall()
 
-    total = conn.execute('SELECT COUNT(*) as count FROM telemetry').fetchone()['count']
+    cursor = conn.execute('SELECT COUNT(*) as count FROM telemetry')
+    total = cursor.fetchone()['count']
 
     conn.close()
 
@@ -417,6 +441,7 @@ def get_crypto_posture_summary():
     sensitive_weak_count = 0
 
     for stat in cipher_stats:
+        stat = dict(stat)
         cipher = stat['tls_cipher_suite']
         sensitivity = stat['data_sensitivity_class']
         count = stat['count']
@@ -436,9 +461,9 @@ def get_crypto_posture_summary():
         'classical_only_percentage': (weak_count / total * 100) if total > 0 else 0,
         'modern_percentage': (modern_count / total * 100) if total > 0 else 0,
         'breakdown': [
-            {'cipher_suite': stat['tls_cipher_suite'],
-             'data_sensitivity': stat['data_sensitivity_class'],
-             'count': stat['count']}
+            {'cipher_suite': dict(stat)['tls_cipher_suite'],
+             'data_sensitivity': dict(stat)['data_sensitivity_class'],
+             'count': dict(stat)['count']}
             for stat in cipher_stats
         ]
     }
@@ -449,9 +474,10 @@ def get_crypto_posture_summary():
 @limiter.limit("60 per minute")
 def get_config():
     conn = get_db_connection()
-    config = conn.execute(
+    cursor = conn.execute(
         'SELECT * FROM scoring_config ORDER BY created_at DESC LIMIT 1'
-    ).fetchone()
+    )
+    config = cursor.fetchone()
     conn.close()
 
     if not config:
@@ -500,7 +526,7 @@ def update_config():
             '''INSERT INTO scoring_config
                (config_version, fraud_weight, telemetry_weight, quantum_weight,
                 low_threshold, medium_threshold, high_threshold, created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
             (config_version,
              data.get('fraud_weight', 0.4),
              data.get('telemetry_weight', 0.4),
@@ -525,15 +551,21 @@ def update_config():
 def get_stats():
     conn = get_db_connection()
 
-    total_sessions = conn.execute('SELECT COUNT(*) as count FROM transactions').fetchone()['count']
-    total_alerts = conn.execute('SELECT COUNT(*) as count FROM alerts').fetchone()['count']
-    open_alerts = conn.execute("SELECT COUNT(*) as count FROM alerts WHERE status = 'open'").fetchone()['count']
+    cursor = conn.execute('SELECT COUNT(*) as count FROM transactions')
+    total_sessions = cursor.fetchone()['count']
 
-    risk_distribution = conn.execute(
+    cursor = conn.execute('SELECT COUNT(*) as count FROM alerts')
+    total_alerts = cursor.fetchone()['count']
+
+    cursor = conn.execute("SELECT COUNT(*) as count FROM alerts WHERE status = 'open'")
+    open_alerts = cursor.fetchone()['count']
+
+    cursor = conn.execute(
         '''SELECT risk_band, COUNT(*) as count
            FROM scores
            GROUP BY risk_band'''
-    ).fetchall()
+    )
+    risk_distribution = cursor.fetchall()
 
     conn.close()
 
@@ -549,7 +581,6 @@ def get_stats():
 @app.route('/api/simulate', methods=['POST'])
 @limiter.limit("10 per minute")
 def simulate_transaction():
-    """Auto-generate a random transaction and score it through the engine"""
     session_id = f"sess_{random.randint(100000, 999999)}"
 
     transaction_data = {
@@ -586,7 +617,6 @@ def simulate_transaction():
 @app.route('/api/ingest', methods=['POST'])
 @limiter.limit("30 per minute")
 def ingest_transaction():
-    """Accept analyst-submitted transaction + telemetry, score it, return result"""
     data = request.json
 
     if not data or not isinstance(data, dict):
@@ -712,15 +742,17 @@ def _check_password(password: str, hashed: str) -> bool:
 
 def _get_or_create_user(email: str, name: str = '', provider: str = 'local') -> dict:
     conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE username = ?', (email,)).fetchone()
+    cursor = conn.execute('SELECT * FROM users WHERE username = %s', (email,))
+    user = cursor.fetchone()
     if not user:
         user_id = f"user_{secrets.token_hex(8)}"
         conn.execute(
-            'INSERT INTO users (user_id, username, role, created_at) VALUES (?, ?, ?, ?)',
+            'INSERT INTO users (user_id, username, role, created_at) VALUES (%s, %s, %s, %s)',
             (user_id, email, 'analyst', datetime.now().isoformat())
         )
         conn.commit()
-        user = conn.execute('SELECT * FROM users WHERE username = ?', (email,)).fetchone()
+        cursor = conn.execute('SELECT * FROM users WHERE username = %s', (email,))
+        user = cursor.fetchone()
     conn.close()
     return dict(user)
 
@@ -759,7 +791,8 @@ def auth_login():
         return jsonify({'error': 'Invalid credentials'}), 400
 
     conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE username = ?', (email,)).fetchone()
+    cursor = conn.execute('SELECT * FROM users WHERE username = %s', (email,))
+    user = cursor.fetchone()
     conn.close()
 
     if not user:
@@ -825,7 +858,8 @@ def auth_register():
         return jsonify({'error': 'Password must contain at least one special character'}), 400
 
     conn = get_db_connection()
-    existing = conn.execute('SELECT user_id FROM users WHERE username = ?', (email,)).fetchone()
+    cursor = conn.execute('SELECT user_id FROM users WHERE username = %s', (email,))
+    existing = cursor.fetchone()
     conn.close()
 
     if existing:
@@ -835,7 +869,7 @@ def auth_register():
 
     hashed = _hash_password(password)
     conn = get_db_connection()
-    conn.execute('UPDATE users SET password_hash = ? WHERE user_id = ?', (hashed, user['user_id']))
+    conn.execute('UPDATE users SET password_hash = %s WHERE user_id = %s', (hashed, user['user_id']))
     conn.commit()
     conn.close()
 
@@ -880,7 +914,6 @@ def auth_me():
 @app.route('/api/auth/validate-email', methods=['POST'])
 @limiter.limit("20 per minute")
 def validate_email():
-    """Validate an email address format and domain"""
     data = request.json
     if not data:
         return jsonify({'error': 'Request body is required'}), 400
@@ -898,6 +931,22 @@ def validate_email():
         return jsonify({'valid': False, 'error': 'Email domain does not exist or has no MX record'}), 400
 
     return jsonify({'valid': True})
+
+
+# ---------------------------------------------------------------------------
+# DB initialization on startup
+# ---------------------------------------------------------------------------
+
+def initialize_database():
+    try:
+        from init_db import init_db
+        init_db()
+        logger.info('Database initialized successfully')
+    except Exception as e:
+        logger.error('Failed to initialize database: %s', e)
+
+
+initialize_database()
 
 
 if __name__ == '__main__':

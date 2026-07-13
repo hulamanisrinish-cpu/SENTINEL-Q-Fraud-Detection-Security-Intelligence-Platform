@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, Shield, Clock, Zap } from 'lucide-react'
+import { apiFetch } from '../api'
 
 interface Alert {
   alert_id: string
@@ -36,7 +37,7 @@ export function AlertQueue({ onAlertSelect, refreshKey }: AlertQueueProps) {
       const url = filter === 'all'
         ? '/api/alerts?limit=50'
         : `/api/alerts?risk_band=${filter}&limit=50`
-      const response = await fetch(url)
+      const response = await apiFetch(url)
       const data = await response.json()
 
       const currentIds = new Set<string>(data.map((a: Alert) => a.alert_id))

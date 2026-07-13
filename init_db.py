@@ -2,14 +2,27 @@
 SENTINEL-Q Database Initialization
 Creates all tables and seeds default configuration
 """
-import sqlite3
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+
+def get_connection():
+    if DATABASE_URL:
+        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
 
     c.execute('''CREATE TABLE IF NOT EXISTS transactions (
@@ -66,7 +79,7 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS alerts (
-        alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id SERIAL PRIMARY KEY,
         score_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'open',
@@ -84,36 +97,23 @@ def init_db():
         created_at TEXT NOT NULL
     )''')
 
-    existing_config = c.execute('SELECT COUNT(*) FROM scoring_config').fetchone()[0]
+    c.execute("SELECT COUNT(*) as count FROM scoring_config")
+    result = c.fetchone()
+    existing_config = result['count'] if isinstance(result, dict) else result[0]
+
     if existing_config == 0:
         c.execute(
             '''INSERT INTO scoring_config
                (config_version, fraud_weight, telemetry_weight, quantum_weight,
                 low_threshold, medium_threshold, high_threshold, created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
             ('v1.0.0', 0.4, 0.4, 0.2, 0.3, 0.6, 0.8, datetime.now().isoformat(), 'system')
         )
 
     conn.commit()
     conn.close()
+    print(f"Database initialized")
 
-    # Migrate: add password_hash column if missing
-    conn2 = sqlite3.connect(DB_PATH)
-    cols = [row[1] for row in conn2.execute("PRAGMA table_info(users)").fetchall()]
-    if 'password_hash' not in cols:
-        conn2.execute('ALTER TABLE users ADD COLUMN password_hash TEXT')
-        conn2.commit()
-        print("Migrated: added password_hash column to users table")
-    if 'name' in cols and 'username' not in cols:
-        conn2.execute('ALTER TABLE users RENAME COLUMN name TO username')
-        conn2.commit()
-        print("Migrated: renamed users.name to users.username")
-    if 'created_at' not in cols:
-        conn2.execute("ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
-        conn2.commit()
-        print("Migrated: added created_at column to users table")
-    conn2.close()
-    print(f"Database initialized at {DB_PATH}")
 
 if __name__ == '__main__':
     init_db()

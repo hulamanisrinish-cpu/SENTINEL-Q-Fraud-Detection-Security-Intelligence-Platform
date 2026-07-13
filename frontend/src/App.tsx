@@ -9,6 +9,7 @@ import { CoverPage } from './components/CoverPage'
 import { LiveInput } from './components/LiveInput'
 import { LoginPage } from './components/LoginPage'
 import { Shield, Cpu, Activity, Database, Lock, RefreshCw, LogOut } from 'lucide-react'
+import { apiFetch } from './api'
 
 function useCountUp(end: number, duration: number = 1.5) {
   const [count, setCount] = useState(0)
@@ -129,7 +130,7 @@ function App() {
     if (params.has('auth_success')) {
       window.history.replaceState({}, '', window.location.pathname)
     }
-    fetch('/api/auth/me', { credentials: 'include' })
+    apiFetch('/api/auth/me')
       .then(r => r.ok ? r.json() : { authenticated: false })
       .then(data => {
         if (data.authenticated) setUser(data.user)
@@ -144,7 +145,7 @@ function App() {
 
   const handleLogout = useCallback(async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+      await apiFetch('/api/auth/logout', { method: 'POST' })
     } catch {}
     setUser(null)
   }, [])
@@ -328,7 +329,7 @@ function Dashboard({ onRefresh }: { onRefresh: () => void }) {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/stats')
+      const response = await apiFetch('/api/stats')
       const data = await response.json()
       setStats(data)
       setLastUpdate(new Date())
@@ -402,7 +403,7 @@ function Dashboard({ onRefresh }: { onRefresh: () => void }) {
         <motion.button
           onClick={async () => {
             try {
-              await fetch('/api/simulate', { method: 'POST' })
+              await apiFetch('/api/simulate', { method: 'POST' })
               fetchStats()
               onRefresh()
             } catch (error) {

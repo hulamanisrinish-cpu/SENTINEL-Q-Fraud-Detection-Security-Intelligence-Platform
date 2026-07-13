@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, Zap, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ArrowRight, Shield } from 'lucide-react'
+import { apiFetch } from '../api'
 
 interface IngestResult {
   success: boolean
@@ -46,7 +47,7 @@ export function LiveInput({ onNewData }: { onNewData: () => void }) {
     setShowSuccess(false)
 
     try {
-      const response = await fetch('/api/ingest', {
+      const response = await apiFetch('/api/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
