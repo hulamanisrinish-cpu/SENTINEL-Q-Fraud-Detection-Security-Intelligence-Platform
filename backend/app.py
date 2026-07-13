@@ -110,11 +110,10 @@ def get_db_connection():
             return conn
         except Exception:
             logger.warning('PostgreSQL connection failed, falling back to SQLite')
-    import sqlite3 as sqlite3_mod
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    import db_compat
     db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
-    conn = sqlite3_mod.connect(db_path)
-    conn.row_factory = sqlite3_mod.Row
-    return conn
+    return db_compat.connect(db_path)
 
 
 def get_scoring_engine():

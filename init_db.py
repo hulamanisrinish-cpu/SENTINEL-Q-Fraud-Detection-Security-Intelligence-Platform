@@ -21,11 +21,9 @@ def get_connection():
             return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         except Exception:
             pass
-    import sqlite3
+    import db_compat
     db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db_compat.connect(db_path)
 
 
 def init_db():

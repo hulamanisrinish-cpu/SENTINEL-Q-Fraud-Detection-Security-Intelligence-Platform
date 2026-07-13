@@ -36,15 +36,13 @@ def generate_seed_data(n_sessions=200, n_high_risk=30):
         try:
             conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         except Exception:
-            import sqlite3
+            import db_compat
             db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
+            conn = db_compat.connect(db_path)
     else:
-        import sqlite3
+        import db_compat
         db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = db_compat.connect(db_path)
 
     c = conn.cursor()
 

@@ -34,11 +34,9 @@ def get_connection():
             return conn
         except Exception:
             pass
+    import db_compat
     db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
-    import sqlite3
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db_compat.connect(db_path)
 
 
 class ScoringEngine:
@@ -50,9 +48,8 @@ class ScoringEngine:
             except Exception:
                 self.conn = get_connection()
         elif db_path_or_url and not db_path_or_url.startswith('postgres'):
-            import sqlite3
-            self.conn = sqlite3.connect(db_path_or_url)
-            self.conn.row_factory = sqlite3.Row
+            import db_compat
+            self.conn = db_compat.connect(db_path_or_url)
         else:
             self.conn = get_connection()
 
