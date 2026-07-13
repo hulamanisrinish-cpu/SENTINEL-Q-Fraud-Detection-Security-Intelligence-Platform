@@ -26,7 +26,12 @@ import dns.resolver
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+if DATABASE_URL and 'sslmode' not in DATABASE_URL:
+    sep = '&' if '?' in DATABASE_URL else '?'
+    DATABASE_URL = f'{DATABASE_URL}{sep}sslmode=require'
 
 WEAK_CIPHERS = ['TLS_RSA_WITH_AES_256_CBC_SHA', 'TLS_RSA_WITH_3DES_EDE_CBC_SHA']
 MODERN_CIPHERS = ['TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305_SHA256',
@@ -100,12 +105,15 @@ def internal_error(e):
 
 def get_db_connection():
     if DATABASE_URL:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-    else:
-        import sqlite3 as sqlite3_mod
-        db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
-        conn = sqlite3_mod.connect(db_path)
-        conn.row_factory = sqlite3_mod.Row
+        try:
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            return conn
+        except Exception:
+            logger.warning('PostgreSQL connection failed, falling back to SQLite')
+    import sqlite3 as sqlite3_mod
+    db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
+    conn = sqlite3_mod.connect(db_path)
+    conn.row_factory = sqlite3_mod.Row
     return conn
 
 

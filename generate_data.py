@@ -9,7 +9,12 @@ from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+if DATABASE_URL and 'sslmode' not in DATABASE_URL:
+    sep = '&' if '?' in DATABASE_URL else '?'
+    DATABASE_URL = f'{DATABASE_URL}{sep}sslmode=require'
 
 GEO_LOCATIONS = ['US-East', 'US-West', 'EU-West', 'EU-Central', 'AP-South', 'AP-East', 'SA-East']
 WEAK_CIPHERS = ['TLS_RSA_WITH_AES_256_CBC_SHA', 'TLS_RSA_WITH_3DES_EDE_CBC_SHA']
@@ -28,7 +33,13 @@ def generate_seed_data(n_sessions=200, n_high_risk=30):
     init_db()
 
     if DATABASE_URL:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        try:
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        except Exception:
+            import sqlite3
+            db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
     else:
         import sqlite3
         db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')

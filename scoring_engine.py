@@ -11,23 +11,44 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 
+def _normalize_db_url(url):
+    if not url:
+        return ''
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+    if 'sslmode' not in url:
+        sep = '&' if '?' in url else '?'
+        url = f'{url}{sep}sslmode=require'
+    return url
+
+
+def _is_valid_pg_url(url):
+    return url and url.startswith('postgresql://')
+
+
 def get_connection():
-    database_url = os.environ.get('DATABASE_URL')
-    if database_url:
-        conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
-    else:
-        db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+    database_url = _normalize_db_url(os.environ.get('DATABASE_URL', ''))
+    if _is_valid_pg_url(database_url):
+        try:
+            conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+            return conn
+        except Exception:
+            pass
+    db_path = os.path.join(os.path.dirname(__file__), '..', 'sentinel_q.db')
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     return conn
 
 
 class ScoringEngine:
     def __init__(self, db_path_or_url: str = None):
-        database_url = os.environ.get('DATABASE_URL')
-        if database_url:
-            self.conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+        database_url = _normalize_db_url(os.environ.get('DATABASE_URL', ''))
+        if _is_valid_pg_url(database_url):
+            try:
+                self.conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+            except Exception:
+                self.conn = get_connection()
         elif db_path_or_url and not db_path_or_url.startswith('postgres'):
             import sqlite3
             self.conn = sqlite3.connect(db_path_or_url)

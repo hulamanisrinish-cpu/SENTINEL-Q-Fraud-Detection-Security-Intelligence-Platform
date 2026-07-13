@@ -7,17 +7,24 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+if DATABASE_URL and 'sslmode' not in DATABASE_URL:
+    sep = '&' if '?' in DATABASE_URL else '?'
+    DATABASE_URL = f'{DATABASE_URL}{sep}sslmode=require'
 
 
 def get_connection():
     if DATABASE_URL:
-        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-    else:
-        import sqlite3
-        db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        try:
+            return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        except Exception:
+            pass
+    import sqlite3
+    db_path = os.path.join(os.path.dirname(__file__), 'sentinel_q.db')
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
         return conn
 
 
