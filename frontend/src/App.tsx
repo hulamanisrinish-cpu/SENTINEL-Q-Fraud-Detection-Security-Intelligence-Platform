@@ -8,6 +8,7 @@ import { ThreeBackground } from './components/ThreeBackground'
 import { CoverPage } from './components/CoverPage'
 import { LiveInput } from './components/LiveInput'
 import { LoginPage } from './components/LoginPage'
+import { AlertDetail } from './components/AlertDetail'
 import { Shield, Cpu, Activity, Database, Lock, RefreshCw, LogOut } from 'lucide-react'
 import { apiFetch } from './api'
 
@@ -124,6 +125,7 @@ function App() {
   const headerOpacity = useTransform(scrollYProgress, [0, 0.1], [0, 1])
   const headerY = useTransform(scrollYProgress, [0, 0.1], [-50, 0])
   const [refreshKey, setRefreshKey] = useState(0)
+  const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -237,7 +239,7 @@ function App() {
       <main className="relative z-10 pt-32 pb-24">
         <DashboardSection onRefresh={handleRefresh} />
         <LiveInputSection onRefresh={handleRefresh} />
-        <AlertsSection refreshKey={refreshKey} />
+        <AlertsSection refreshKey={refreshKey} selectedAlertId={selectedAlertId} onSelectAlert={setSelectedAlertId} />
         <CryptoSection />
         <ConfigSection />
       </main>
@@ -258,7 +260,7 @@ function DashboardSection({ onRefresh }: { onRefresh: () => void }) {
   )
 }
 
-function AlertsSection({ refreshKey }: { refreshKey: number }) {
+function AlertsSection({ refreshKey, selectedAlertId, onSelectAlert }: { refreshKey: number; selectedAlertId: string | null; onSelectAlert: (id: string | null) => void }) {
   const ref = useRef(null)
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] })
   const y = useTransform(scrollYProgress, [0, 1], [-80, 80])
@@ -270,7 +272,11 @@ function AlertsSection({ refreshKey }: { refreshKey: number }) {
         <h2 className="text-4xl font-semibold font-display tracking-tight mb-2">Alert Queue</h2>
         <p className="text-sm font-mono text-white/30">Real-time threat detection and analysis</p>
       </div>
-      <AlertQueue onAlertSelect={() => {}} refreshKey={refreshKey} />
+      {selectedAlertId ? (
+        <AlertDetail alertId={selectedAlertId} onBack={() => onSelectAlert(null)} />
+      ) : (
+        <AlertQueue onAlertSelect={(id) => onSelectAlert(id)} refreshKey={refreshKey} />
+      )}
     </motion.section>
   )
 }
