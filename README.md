@@ -41,44 +41,7 @@ SENTINEL-Q is a **real-time correlation engine** that joins transaction behavior
 
 <div align="center">
 
-```mermaid
-graph LR
-    subgraph "🔗 DATA SOURCES"
-        A["💳 Transaction<br/>Behavior"] 
-        B["🔒 Security<br/>Telemetry"]
-        C["🔐 Crypto<br/>Inventory"]
-    end
-
-    subgraph "⚙️ CORRELATION ENGINE"
-        D["Session-ID<br/>Join"]
-        E["Multi-Signal<br/>Scorer"]
-        F["Quantum Posture<br/>Analyzer"]
-    end
-
-    subgraph "📊 OUTPUT"
-        G["🎯 Composite<br/>Risk Score"]
-        H["🚨 SOC<br/>Alerts"]
-        I["🛡️ Crypto<br/>Exposure"]
-    end
-
-    A --> D
-    B --> D
-    D --> E
-    E --> G
-    E --> H
-    C --> F
-    F --> I
-
-    style A fill:#1a1a2e,stroke:#e94560,color:#fff
-    style B fill:#1a1a2e,stroke:#e94560,color:#fff
-    style C fill:#1a1a2e,stroke:#e94560,color:#fff
-    style D fill:#16213e,stroke:#0f3460,color:#fff
-    style E fill:#16213e,stroke:#0f3460,color:#fff
-    style F fill:#16213e,stroke:#0f3460,color:#fff
-    style G fill:#0f3460,stroke:#533483,color:#fff
-    style H fill:#0f3460,stroke:#533483,color:#fff
-    style I fill:#0f3460,stroke:#533483,color:#fff
-```
+![Solution Flow](docs/images/solution.png)
 
 </div>
 
@@ -293,58 +256,7 @@ Composite Score = (0.40 × Fraud) + (0.40 × Telemetry) + (0.20 × Quantum Postu
 
 <div align="center">
 
-```mermaid
-graph TB
-    subgraph FRONTEND["🌐 FRONTEND — Vercel"]
-        direction LR
-        F1["📊 Dashboard"]
-        F2["⚡ Live Input"]
-        F3["🚨 Alert Queue"]
-        F4["🔐 Crypto Posture"]
-        F5["⚙️ Config Panel"]
-    end
-
-    subgraph API["🔗 REST API — HTTPS"]
-        direction LR
-        A1["GET /api/alerts"]
-        A2["POST /api/ingest"]
-        A3["POST /api/simulate"]
-        A4["GET /api/config"]
-        A5["POST /api/auth/*"]
-    end
-
-    subgraph BACKEND["⚙️ BACKEND — Render"]
-        direction TB
-        B1["🛡️ Auth & Rate Limiting<br/>bcrypt · Flask-Limiter"]
-        B2["🧮 Scoring Engine<br/>Fraud + Telemetry + Quantum"]
-        B3["🤖 SHAP Explainability<br/>Per-alert feature attribution"]
-        B4["📈 Stats & Analytics"]
-    end
-
-    subgraph DB["💾 DATABASE"]
-        direction LR
-        D1[("🐘 PostgreSQL<br/>Production")]
-        D2[("📁 SQLite<br/>Development")]
-    end
-
-    subgraph SCORING["🎯 SCORING PIPELINE"]
-        direction LR
-        S1["Fraud Score<br/>z-score · velocity<br/>new payee"]
-        S2["Telemetry Score<br/>IP reputation<br/>geo mismatch · device"]
-        S3["Quantum Score<br/>cipher risk<br/>× sensitivity"]
-    end
-
-    FRONTEND -->|"REST API"| API
-    API --> BACKEND
-    BACKEND --> DB
-    B2 --> SCORING
-
-    style FRONTEND fill:#0a0a1a,stroke:#e94560,color:#fff
-    style API fill:#1a1a2e,stroke:#0f3460,color:#fff
-    style BACKEND fill:#16213e,stroke:#533483,color:#fff
-    style DB fill:#1a1a2e,stroke:#4169E1,color:#fff
-    style SCORING fill:#0f3460,stroke:#e94560,color:#fff
-```
+![Architecture Diagram](docs/images/architecture.png)
 
 </div>
 
