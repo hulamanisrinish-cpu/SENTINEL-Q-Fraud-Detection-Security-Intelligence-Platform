@@ -214,6 +214,7 @@ def score_and_store(session_id, transaction_data, telemetry_data):
             pass
         return None
 
+@app.route('/', methods=['GET'])
 @app.route('/health', methods=['GET'])
 @limiter.exempt
 def health():
